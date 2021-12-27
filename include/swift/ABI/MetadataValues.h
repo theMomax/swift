@@ -2032,8 +2032,9 @@ inline int descendingPriorityOrder(JobPriority lhs,
 class TaskCreateFlags : public FlagSet<size_t> {
 public:
   enum {
-    Priority       = 0,
-    Priority_width = 8,
+    // Priority that user specified while creating the task
+    CreationPriority = 0,
+    CreationPriority_width = 8,
 
     Task_IsChildTask                              = 8,
     // bit 9 is unused
@@ -2046,8 +2047,9 @@ public:
   explicit constexpr TaskCreateFlags(size_t bits) : FlagSet(bits) {}
   constexpr TaskCreateFlags() {}
 
-  FLAGSET_DEFINE_FIELD_ACCESSORS(Priority, Priority_width, JobPriority,
-                                 getPriority, setPriority)
+  FLAGSET_DEFINE_FIELD_ACCESSORS(CreationPriority, CreationPriority_width,
+                                 JobPriority, getCreationPriority,
+                                 setCreationPriority)
   FLAGSET_DEFINE_FLAG_ACCESSORS(Task_IsChildTask,
                                 isChildTask,
                                 setIsChildTask)
