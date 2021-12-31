@@ -2028,6 +2028,11 @@ inline int descendingPriorityOrder(JobPriority lhs,
   return (lhs == rhs ? 0 : lhs > rhs ? -1 : 1);
 }
 
+inline JobPriority withPriorityDowngrade(JobPriority priority) {
+  return (priority == JobPriority::UserInteractive) ? JobPriority::UserInitiated
+                                                    : priority;
+}
+
 /// Flags for task creation.
 class TaskCreateFlags : public FlagSet<size_t> {
 public:
