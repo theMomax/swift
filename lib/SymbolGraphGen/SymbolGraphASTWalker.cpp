@@ -35,13 +35,11 @@ bool areModulesEqual(const ModuleDecl *lhs, const ModuleDecl *rhs, bool ignoreUn
 
 } // anonymous namespace
 
-SymbolGraphASTWalker::SymbolGraphASTWalker(ModuleDecl &M,
-                                           const SmallPtrSet<ModuleDecl *, 4> ExportedImportedModules,
-                                           const SymbolGraphOptions &Options)
-  : Options(Options),
-    M(M),
-    ExportedImportedModules(ExportedImportedModules),
-    MainGraph(*this, M, None, Ctx) {}
+SymbolGraphASTWalker::SymbolGraphASTWalker(
+    ModuleDecl &M, const SmallPtrSet<ModuleDecl *, 4> ExportedImportedModules,
+    const SymbolGraphOptions &Options)
+    : Options(Options), M(M), ExportedImportedModules(ExportedImportedModules),
+      MainGraph(*this, M, None, Ctx, Options.EmitExtensionBlockSymbols) {}
 
 /// Get a "sub" symbol graph for the parent module of a type that
 /// the main module `M` is extending.
@@ -76,11 +74,10 @@ SymbolGraph *SymbolGraphASTWalker::getModuleSymbolGraph(const Decl *D) {
   if (Found != ExtendedModuleGraphs.end()) {
     return Found->getValue();
   }
-  auto *Memory = Ctx.allocate(sizeof(SymbolGraph), alignof(SymbolGraph));  
-  auto *SG = new (Memory) SymbolGraph(*this,
-                                      MainGraph.M,
-                                      Optional<ModuleDecl *>(M),
-                                      Ctx);
+  auto *Memory = Ctx.allocate(sizeof(SymbolGraph), alignof(SymbolGraph));
+  auto *SG =
+      new (Memory) SymbolGraph(*this, MainGraph.M, Optional<ModuleDecl *>(M),
+                               Ctx, Options.EmitExtensionBlockSymbols);
 
   ExtendedModuleGraphs.insert({M->getNameStr(), SG});
   return SG;
@@ -105,29 +102,29 @@ bool isUnavailableOrObsoleted(const Decl *D) {
 } // end anonymous namespace
 
 bool SymbolGraphASTWalker::walkToDeclPre(Decl *D, CharSourceRange Range) {
-    if (isUnavailableOrObsoleted(D)) {
-      return false;
-    }
+  if (isUnavailableOrObsoleted(D)) {
+    return false;
+  }
 
-    switch (D->getKind()) {
-    // We'll record nodes for the following kinds of declarations.
-    case swift::DeclKind::Class:
-    case swift::DeclKind::Struct:
-    case swift::DeclKind::Enum:
-    case swift::DeclKind::EnumElement:
-    case swift::DeclKind::Protocol:
-    case swift::DeclKind::Constructor:
-    case swift::DeclKind::Func:
-    case swift::DeclKind::Var:
-    case swift::DeclKind::Subscript:
-    case swift::DeclKind::TypeAlias:
-    case swift::DeclKind::AssociatedType:
-    case swift::DeclKind::Extension:
-      break;
-      
-    // We'll descend into everything else.
-    default:
-      return true;
+  switch (D->getKind()) {
+  // We'll record nodes for the following kinds of declarations.
+  case swift::DeclKind::Class:
+  case swift::DeclKind::Struct:
+  case swift::DeclKind::Enum:
+  case swift::DeclKind::EnumElement:
+  case swift::DeclKind::Protocol:
+  case swift::DeclKind::Constructor:
+  case swift::DeclKind::Func:
+  case swift::DeclKind::Var:
+  case swift::DeclKind::Subscript:
+  case swift::DeclKind::TypeAlias:
+  case swift::DeclKind::AssociatedType:
+  case swift::DeclKind::Extension:
+    break;
+
+  // We'll descend into everything else.
+  default:
+    return true;
   }
 
   auto SG = getModuleSymbolGraph(D);
@@ -146,11 +143,30 @@ bool SymbolGraphASTWalker::walkToDeclPre(Decl *D, CharSourceRange Range) {
       return false;
     }
 
+    // We only treat extensions to external types as extensions. Extensions to
+    // local types are directly associated with the extended nominal.
+    auto const shouldBeRecordedAsExtension =
+        Options.EmitExtensionBlockSymbols &&
+        !Extension->getModuleContext()->getNameStr().equals(
+            ExtendedNominal->getModuleContext()->getNameStr());
+
+    Symbol Source = shouldBeRecordedAsExtension
+                        ? Symbol(ExtendedSG, Extension, nullptr)
+                        : Symbol(ExtendedSG, ExtendedNominal, nullptr);
+    // The extended nominal is recorded elsewhere for local types.
+    if (shouldBeRecordedAsExtension) {
+      ExtendedSG->recordNode(Source);
+
+      // Next to the extension symbol itself, we also introduce a relationship
+      // between the extension symbol and the extended nominal.
+      ExtendedSG->recordEdge(Source,
+                             Symbol(ExtendedSG, ExtendedNominal, nullptr),
+                             RelationshipKind::ExtensionTo());
+    }
+
     // If there are some protocol conformances on this extension, we'll
     // grab them for some new conformsTo relationships.
     if (!Extension->getInherited().empty()) {
-
-      // The symbol graph to use to record these relationships.
       SmallVector<const ProtocolDecl *, 4> Protocols;
       SmallVector<const ProtocolCompositionType *, 4> UnexpandedCompositions;
 
@@ -180,23 +196,16 @@ bool SymbolGraphASTWalker::walkToDeclPre(Decl *D, CharSourceRange Range) {
         }
       }
 
-      Symbol Source(ExtendedSG, ExtendedNominal, nullptr);
-
       for (const auto *Proto : Protocols) {
         Symbol Target(&MainGraph, Proto, nullptr);
         ExtendedSG->recordEdge(Source, Target, RelationshipKind::ConformsTo(),
                                Extension);
       }
 
-      // While we won't record this node per se, or all of the other kinds of
-      // relationships, we might establish some synthesized members because we
+      // We also might establish some synthesized members because we
       // extended an external type.
       if (ExtendedNominal->getModuleContext() != &M) {
-        ExtendedSG->recordConformanceSynthesizedMemberRelationships({
-          ExtendedSG,
-          ExtendedNominal,
-          nullptr
-        });
+        ExtendedSG->recordConformanceSynthesizedMemberRelationships(Source);
       }
     }
 

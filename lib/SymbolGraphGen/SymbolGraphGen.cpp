@@ -104,7 +104,8 @@ printSymbolGraphForDecl(const ValueDecl *D, Type BaseTy,
   ModuleDecl *MD = D->getModuleContext();
   SymbolGraphASTWalker Walker(*MD, {}, Options);
   markup::MarkupContext MarkupCtx;
-  SymbolGraph Graph(Walker, *MD, None, MarkupCtx, None,
+  SymbolGraph Graph(Walker, *MD, None, MarkupCtx,
+                    Options.EmitExtensionBlockSymbols, None,
                     /*IsForSingleNode=*/true);
   NominalTypeDecl *NTD = InSynthesizedExtension
       ? BaseTy->getAnyNominal()
