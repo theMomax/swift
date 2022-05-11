@@ -32,11 +32,18 @@ struct SymbolGraph;
 class Symbol {
   /// The symbol graph in which this symbol resides.
   SymbolGraph *Graph;
-  const ValueDecl *VD;
+  /// Either a ValueDecl* or ExtensionDecl*.
+  const Decl *D;
   Type BaseType;
   const NominalTypeDecl *SynthesizedBaseTypeDecl;
 
-  std::pair<StringRef, StringRef> getKind(const ValueDecl *VD) const;
+  Symbol(SymbolGraph *Graph, const ValueDecl *VD, const ExtensionDecl *ED,
+         const NominalTypeDecl *SynthesizedBaseTypeDecl,
+         Type BaseTypeForSubstitution = Type());
+
+  std::pair<StringRef, StringRef> getKind(const Decl *D) const;
+
+  swift::DeclName getName(const Decl *D) const;
 
   void serializeKind(StringRef Identifier, StringRef DisplayName,
                      llvm::json::OStream &OS) const;
@@ -79,6 +86,10 @@ class Symbol {
   void serializeSPIMixin(llvm::json::OStream &OS) const;
 
 public:
+  Symbol(SymbolGraph *Graph, const ExtensionDecl *ED,
+         const NominalTypeDecl *SynthesizedBaseTypeDecl,
+         Type BaseTypeForSubstitution = Type());
+
   Symbol(SymbolGraph *Graph, const ValueDecl *VD,
          const NominalTypeDecl *SynthesizedBaseTypeDecl,
          Type BaseTypeForSubstitution = Type());
@@ -90,8 +101,14 @@ public:
   }
 
   const ValueDecl *getSymbolDecl() const {
-    return VD;
+    if (const auto *ED = dyn_cast<ExtensionDecl>(D)) {
+      return ED->getExtendedNominal();
+    } else {
+      return cast<ValueDecl>(D);
+    }
   }
+
+  const Decl *getLocalSymbolDecl() const { return D; }
 
   Type getBaseType() const {
     return BaseType;
@@ -120,6 +137,13 @@ public:
   const ValueDecl *getDeclInheritingDocs() const;
 
   static bool supportsKind(DeclKind Kind);
+
+  /// Determines the effective access level of the given extension.
+  ///
+  /// The effective access level is defined as the minimum of:
+  ///  - the maximum access level of a property or conformance
+  ///  - the access level of the extended nominal
+  static AccessLevel getEffectiveAccessLevel(const ExtensionDecl *ED);
 };
 
 } // end namespace symbolgraphgen
@@ -149,18 +173,19 @@ template <> struct DenseMapInfo<Symbol> {
   static unsigned getHashValue(const Symbol S) {
     unsigned H = 0;
     H ^= DenseMapInfo<SymbolGraph *>::getHashValue(S.getGraph());
-    H ^= DenseMapInfo<const swift::ValueDecl *>::getHashValue(S.getSymbolDecl());
+    H ^=
+        DenseMapInfo<const swift::Decl *>::getHashValue(S.getLocalSymbolDecl());
     H ^= DenseMapInfo<const swift::NominalTypeDecl *>::getHashValue(S.getSynthesizedBaseTypeDecl());
     H ^= DenseMapInfo<swift::Type>::getHashValue(S.getBaseType());
     return H;
   }
   static bool isEqual(const Symbol LHS, const Symbol RHS) {
     return LHS.getGraph() == RHS.getGraph() &&
-        LHS.getSymbolDecl() == RHS.getSymbolDecl() &&
-        LHS.getSynthesizedBaseTypeDecl() ==
-            RHS.getSynthesizedBaseTypeDecl() &&
-        DenseMapInfo<swift::Type>::
-            isEqual(LHS.getBaseType(), RHS.getBaseType());
+           LHS.getLocalSymbolDecl() == RHS.getLocalSymbolDecl() &&
+           LHS.getSynthesizedBaseTypeDecl() ==
+               RHS.getSynthesizedBaseTypeDecl() &&
+           DenseMapInfo<swift::Type>::isEqual(LHS.getBaseType(),
+                                              RHS.getBaseType());
   }
 };
 } // end namespace llvm
