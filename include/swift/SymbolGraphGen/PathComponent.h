@@ -27,7 +27,7 @@ struct PathComponent {
   /// The kind of the corresponding symbol graph node.
   StringRef Kind;
   /// The swift decl associated with the corresponding symbol graph node.
-  const ValueDecl *VD;
+  const Decl *D;
 };
 
 } // end namespace symbolgraphgen
