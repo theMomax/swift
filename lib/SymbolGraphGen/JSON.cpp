@@ -72,6 +72,24 @@ void swift::symbolgraphgen::serialize(const ExtensionDecl *Extension,
       if (const auto *ExtendedModule = ExtendedNominal->getModuleContext()) {
         OS.attribute("extendedModule", ExtendedModule->getNameStr());
       }
+
+      StringRef Kind;
+      switch (ExtendedNominal->getKind()) {
+      case DeclKind::Class:
+        Kind = "class";
+        break;
+      case DeclKind::Struct:
+        Kind = "struct";
+        break;
+      case DeclKind::Enum:
+        Kind = "enum";
+        break;
+      default:
+        Kind = "unknown";
+        break;
+      }
+
+      OS.attribute("typeKind", Kind);
     }
 
     SmallVector<Requirement, 4> FilteredRequirements;

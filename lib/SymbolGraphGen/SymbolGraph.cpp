@@ -223,7 +223,7 @@ void SymbolGraph::recordEdge(Symbol Source,
 }
 
 void SymbolGraph::recordMemberRelationship(Symbol S) {
-  const auto *DC = S.getSymbolDecl()->getDeclContext();
+  const auto *DC = S.getLocalSymbolDecl()->getDeclContext();
   switch (DC->getContextKind()) {
     case DeclContextKind::GenericTypeDecl:
     case DeclContextKind::ExtensionDecl:
@@ -241,12 +241,30 @@ void SymbolGraph::recordMemberRelationship(Symbol S) {
       if (isRequirementOrDefaultImplementation(S.getSymbolDecl())) {
         return;
       }
+
       if (DC->getSelfNominalTypeDecl() == nullptr) {
         // If we couldn't look up the type the member is declared on (e.g.
         // because the member is declared in an extension whose extended type
         // doesn't exist), don't record a memberOf relationship.
         return;
       }
+
+      // If this is an extension to an external type, we use the extension
+      // symbol itself as the target.
+      if (auto const *Extension =
+              dyn_cast_or_null<ExtensionDecl>(DC->getAsDecl())) {
+        auto const isExtensionToExternalType =
+            !Extension->getModuleContext()->getNameStr().equals(
+                Extension->getExtendedNominal()
+                    ->getModuleContext()
+                    ->getNameStr());
+
+        if (isExtensionToExternalType) {
+          return recordEdge(S, Symbol(this, Extension, nullptr),
+                            RelationshipKind::MemberOf());
+        }
+      }
+
       return recordEdge(S,
                         Symbol(this, DC->getSelfNominalTypeDecl(), nullptr),
                         RelationshipKind::MemberOf());
@@ -288,11 +306,11 @@ void SymbolGraph::recordConformanceSynthesizedMemberRelationships(Symbol S) {
   if (!Walker.Options.EmitSynthesizedMembers) {
     return;
   }
-  const auto VD = S.getSymbolDecl();
+  const auto D = S.getLocalSymbolDecl();
   const NominalTypeDecl *OwningNominal = nullptr;
-  if (const auto *ThisNominal = dyn_cast<NominalTypeDecl>(VD)) {
+  if (const auto *ThisNominal = dyn_cast<NominalTypeDecl>(D)) {
     OwningNominal = ThisNominal;
-  } else if (const auto *Extension = dyn_cast<ExtensionDecl>(VD)) {
+  } else if (const auto *Extension = dyn_cast<ExtensionDecl>(D)) {
     if (const auto *ExtendedNominal = Extension->getExtendedNominal()) {
       if (!ExtendedNominal->getModuleContext()->getNameStr()
           .equals(M.getNameStr())) {
@@ -446,13 +464,13 @@ void SymbolGraph::recordOptionalRequirementRelationships(Symbol S) {
 
 void
 SymbolGraph::recordConformanceRelationships(Symbol S) {
-  const auto VD = S.getSymbolDecl();
+  const auto VD = S.getLocalSymbolDecl();
   if (const auto *NTD = dyn_cast<NominalTypeDecl>(VD)) {
     for (const auto *Conformance : NTD->getAllConformances()) {
-      recordEdge(Symbol(this, VD, nullptr),
-        Symbol(this, Conformance->getProtocol(), nullptr),
-        RelationshipKind::ConformsTo(),
-        dyn_cast_or_null<ExtensionDecl>(Conformance->getDeclContext()));
+      recordEdge(
+          S, Symbol(this, Conformance->getProtocol(), nullptr),
+          RelationshipKind::ConformsTo(),
+          dyn_cast_or_null<ExtensionDecl>(Conformance->getDeclContext()));
     }
   }
 }
@@ -530,7 +548,7 @@ SymbolGraph::serializeDeclarationFragments(StringRef Key,
     Options.setBaseType(S.getBaseType());
     Options.PrintAsMember = true;
   }
-  S.getSymbolDecl()->print(Printer, Options);
+  S.getLocalSymbolDecl()->print(Printer, Options);
 }
 
 void
@@ -549,7 +567,7 @@ SymbolGraph::serializeSubheadingDeclarationFragments(StringRef Key,
                                                      llvm::json::OStream &OS) {
   DeclarationFragmentPrinter Printer(this, OS, Key);
 
-  if (const auto *TD = dyn_cast<GenericTypeDecl>(S.getSymbolDecl())) {
+  if (const auto *TD = dyn_cast<GenericTypeDecl>(S.getLocalSymbolDecl())) {
     Printer.printAbridgedType(TD, /*PrintKeyword=*/true);
   } else {
     auto Options = getSubHeadingDeclarationFragmentsPrintOptions();
@@ -557,7 +575,7 @@ SymbolGraph::serializeSubheadingDeclarationFragments(StringRef Key,
       Options.setBaseType(S.getBaseType());
       Options.PrintAsMember = true;
     }
-    S.getSymbolDecl()->print(Printer, Options);
+    S.getLocalSymbolDecl()->print(Printer, Options);
   }
 }
 
