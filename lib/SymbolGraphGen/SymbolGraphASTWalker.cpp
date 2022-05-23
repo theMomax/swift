@@ -35,13 +35,11 @@ bool areModulesEqual(const ModuleDecl *lhs, const ModuleDecl *rhs, bool ignoreUn
 
 } // anonymous namespace
 
-SymbolGraphASTWalker::SymbolGraphASTWalker(ModuleDecl &M,
-                                           const SmallPtrSet<ModuleDecl *, 4> ExportedImportedModules,
-                                           const SymbolGraphOptions &Options)
-  : Options(Options),
-    M(M),
-    ExportedImportedModules(ExportedImportedModules),
-    MainGraph(*this, M, None, Ctx) {}
+SymbolGraphASTWalker::SymbolGraphASTWalker(
+    ModuleDecl &M, const SmallPtrSet<ModuleDecl *, 4> ExportedImportedModules,
+    const SymbolGraphOptions &Options)
+    : Options(Options), M(M), ExportedImportedModules(ExportedImportedModules),
+      MainGraph(*this, M, None, Ctx, Options.EmitExtensionBlockSymbols) {}
 
 /// Get a "sub" symbol graph for the parent module of a type that
 /// the main module `M` is extending.
@@ -76,11 +74,10 @@ SymbolGraph *SymbolGraphASTWalker::getModuleSymbolGraph(const Decl *D) {
   if (Found != ExtendedModuleGraphs.end()) {
     return Found->getValue();
   }
-  auto *Memory = Ctx.allocate(sizeof(SymbolGraph), alignof(SymbolGraph));  
-  auto *SG = new (Memory) SymbolGraph(*this,
-                                      MainGraph.M,
-                                      Optional<ModuleDecl *>(M),
-                                      Ctx);
+  auto *Memory = Ctx.allocate(sizeof(SymbolGraph), alignof(SymbolGraph));
+  auto *SG =
+      new (Memory) SymbolGraph(*this, MainGraph.M, Optional<ModuleDecl *>(M),
+                               Ctx, Options.EmitExtensionBlockSymbols);
 
   ExtendedModuleGraphs.insert({M->getNameStr(), SG});
   return SG;

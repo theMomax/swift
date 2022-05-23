@@ -28,26 +28,23 @@
 using namespace swift;
 using namespace symbolgraphgen;
 
-SymbolGraph::SymbolGraph(SymbolGraphASTWalker &Walker,
-                         ModuleDecl &M,
+SymbolGraph::SymbolGraph(SymbolGraphASTWalker &Walker, ModuleDecl &M,
                          Optional<ModuleDecl *> ExtendedModule,
                          markup::MarkupContext &Ctx,
+                         bool AssociateMembersWithExtensionBlock,
                          Optional<llvm::VersionTuple> ModuleVersion,
                          bool IsForSingleNode)
-: Walker(Walker),
-  M(M),
-  ExtendedModule(ExtendedModule),
-  Ctx(Ctx),
-  ModuleVersion(ModuleVersion),
-  IsForSingleNode(IsForSingleNode) {
-    if (auto *DM = M.getDeclaringModuleIfCrossImportOverlay()) {
-      DeclaringModule = DM;
-      SmallVector<Identifier, 1> Bystanders;
-      if (M.getRequiredBystandersIfCrossImportOverlay(DM, Bystanders)) {
-        BystanderModules = Bystanders;
-      }
+    : Walker(Walker), M(M), ExtendedModule(ExtendedModule), Ctx(Ctx),
+      ModuleVersion(ModuleVersion), IsForSingleNode(IsForSingleNode),
+      AssociateMembersWithExtensionBlock(AssociateMembersWithExtensionBlock) {
+  if (auto *DM = M.getDeclaringModuleIfCrossImportOverlay()) {
+    DeclaringModule = DM;
+    SmallVector<Identifier, 1> Bystanders;
+    if (M.getRequiredBystandersIfCrossImportOverlay(DM, Bystanders)) {
+      BystanderModules = Bystanders;
     }
   }
+}
 
 // MARK: - Utilities
 
@@ -253,13 +250,14 @@ void SymbolGraph::recordMemberRelationship(Symbol S) {
       // symbol itself as the target.
       if (auto const *Extension =
               dyn_cast_or_null<ExtensionDecl>(DC->getAsDecl())) {
-        auto const isExtensionToExternalType =
+        auto const shouldBeRecordedAsExtension =
+            AssociateMembersWithExtensionBlock &&
             !Extension->getModuleContext()->getNameStr().equals(
                 Extension->getExtendedNominal()
                     ->getModuleContext()
                     ->getNameStr());
 
-        if (isExtensionToExternalType) {
+        if (shouldBeRecordedAsExtension) {
           return recordEdge(S, Symbol(this, Extension, nullptr),
                             RelationshipKind::MemberOf());
         }

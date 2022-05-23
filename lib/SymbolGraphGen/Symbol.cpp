@@ -607,13 +607,21 @@ swift::DeclName Symbol::getName(const Decl *D) const {
 
 void
 Symbol::getPathComponents(SmallVectorImpl<PathComponent> &Components) const {
+  const ValueDecl *Decl = nullptr;
+  if (const auto *ED = dyn_cast<ExtensionDecl>(D)) {
+    Decl = ED->getExtendedNominal();
+  } else if (const auto *VD = dyn_cast<ValueDecl>(D)) {
+    Decl = VD;
+  }
+
   // Note: this is also used for sourcekit's cursor-info request, so can be
   // called on local symbols too. For such symbols, the path contains all parent
   // decl contexts that are currently representable in the symbol graph,
   // skipping over the rest (e.g. containing closures and accessors).
 
   auto collectPathComponents =
-      [&](const Decl *Decl, SmallVectorImpl<PathComponent> &DeclComponents) {
+      [&](const ValueDecl *Decl,
+          SmallVectorImpl<PathComponent> &DeclComponents) {
         // Collect the spellings, kinds, and decls of the fully qualified
         // identifier components.
         while (Decl && !isa<ModuleDecl>(Decl)) {
@@ -645,14 +653,14 @@ Symbol::getPathComponents(SmallVectorImpl<PathComponent> &Components) const {
     // existing on another type, such as a default implementation of
     // a protocol. Build a path as if it were defined in the base type.
     SmallString<32> LastPathComponent;
-    getName(D).getString(LastPathComponent);
-    if (supportsKind(D->getKind()))
-      Components.push_back({LastPathComponent, getKind(D).first, D});
+    getName(Decl).getString(LastPathComponent);
+    if (supportsKind(Decl->getKind()))
+      Components.push_back({LastPathComponent, getKind(Decl).first, Decl});
     collectPathComponents(BaseTypeDecl, Components);
   } else {
     // Otherwise, this is just a normal declaration, so we can build
     // its path normally.
-    collectPathComponents(D, Components);
+    collectPathComponents(Decl, Components);
   }
 
   // The list is leaf-to-root, but we want root-to-leaf, so reverse it.

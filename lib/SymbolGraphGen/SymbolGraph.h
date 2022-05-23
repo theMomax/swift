@@ -79,10 +79,15 @@ struct SymbolGraph {
    */
   bool IsForSingleNode;
 
-  SymbolGraph(SymbolGraphASTWalker &Walker,
-              ModuleDecl &M,
-              Optional<ModuleDecl *> ExtendedModule,
-              markup::MarkupContext &Ctx,
+  /**
+   Designates whether members declared in extensions should be associated with
+   the extension symbol or the extended symbol.
+   */
+  bool AssociateMembersWithExtensionBlock;
+
+  SymbolGraph(SymbolGraphASTWalker &Walker, ModuleDecl &M,
+              Optional<ModuleDecl *> ExtendedModule, markup::MarkupContext &Ctx,
+              bool AssociateMembersWithExtensionBlock,
               Optional<llvm::VersionTuple> ModuleVersion = None,
               bool IsForSingleNode = false);
 
