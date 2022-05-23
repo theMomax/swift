@@ -148,15 +148,16 @@ bool SymbolGraphASTWalker::walkToDeclPre(Decl *D, CharSourceRange Range) {
 
     // We only treat extensions to external types as extensions. Extensions to
     // local types are directly associated with the extended nominal.
-    auto const isExtensionToExternalType =
+    auto const shouldBeRecordedAsExtension =
+        Options.EmitExtensionBlockSymbols &&
         !Extension->getModuleContext()->getNameStr().equals(
             ExtendedNominal->getModuleContext()->getNameStr());
 
-    Symbol Source = isExtensionToExternalType
+    Symbol Source = shouldBeRecordedAsExtension
                         ? Symbol(ExtendedSG, Extension, nullptr)
                         : Symbol(ExtendedSG, ExtendedNominal, nullptr);
     // The extended nominal is recorded elsewhere for local types.
-    if (isExtensionToExternalType) {
+    if (shouldBeRecordedAsExtension) {
       ExtendedSG->recordNode(Source);
 
       // Next to the extension symbol itself, we also introduce a relationship
