@@ -215,6 +215,37 @@ const ValueDecl *Symbol::getDeclInheritingDocs() const {
   }
 }
 
+namespace {
+
+StringRef getFileNameForDecl(const Decl *D) {
+  if (!D) return StringRef{};
+
+  SourceLoc Loc = D->getLoc(/*SerializedOK=*/true);
+  if (Loc.isInvalid()) return StringRef{};
+
+  SourceManager &SourceM = D->getASTContext().SourceMgr;
+  return SourceM.getDisplayNameForLoc(Loc);
+}
+
+StringRef getFileNameForDecl(const clang::Decl *ClangD) {
+  if (!ClangD) return StringRef{};
+
+  const clang::SourceManager &ClangSourceMgr = ClangD->getASTContext().getSourceManager();
+  clang::PresumedLoc Loc = ClangSourceMgr.getPresumedLoc(ClangD->getLocation());
+  if (Loc.isInvalid()) return StringRef{};
+
+  return StringRef(Loc.getFilename());
+}
+
+void serializeFileURI(llvm::json::OStream &OS, StringRef FileName) {
+  // FIXME: This can emit invalid URIs if the file name has a space in it (rdar://69242070)
+  SmallString<1024> FileURI("file://");
+  FileURI.append(FileName);
+  OS.attribute("uri", FileURI.str());
+}
+
+}
+
 void Symbol::serializeDocComment(llvm::json::OStream &OS) const {
   if (ClangNode ClangN = D->getClangNode()) {
     if (!Graph->Walker.Options.IncludeClangDocs)
@@ -239,6 +270,12 @@ void Symbol::serializeDocComment(llvm::json::OStream &OS) const {
       splitIntoLines(Text, Lines);
 
       OS.attributeObject("docComment", [&]() {
+        StringRef FileName = getFileNameForDecl(ClangD);
+        if (!FileName.empty())
+          serializeFileURI(OS, FileName);
+        if (const auto *ModuleD = D->getModuleContext()) {
+          OS.attribute("module", ModuleD->getNameStr());
+        }
         OS.attributeArray("lines", [&]() {
           for (StringRef Line : Lines) {
             OS.object([&](){
@@ -265,6 +302,12 @@ void Symbol::serializeDocComment(llvm::json::OStream &OS) const {
   }
 
   OS.attributeObject("docComment", [&](){
+    StringRef FileName = getFileNameForDecl(DocCommentProvidingDecl);
+    if (!FileName.empty())
+      serializeFileURI(OS, FileName);
+    if (const auto *ModuleD = DocCommentProvidingDecl->getModuleContext()) {
+      OS.attribute("module", ModuleD->getNameStr());
+    }
     auto LL = Graph->Ctx.getLineList(RC);
     StringRef FirstNonBlankLine;
     for (const auto &Line : LL.getLines()) {
@@ -452,18 +495,13 @@ void Symbol::serializeLocationMixin(llvm::json::OStream &OS) const {
       return;
 
     if (auto *ClangD = ClangN.getAsDecl()) {
-      clang::SourceManager &ClangSM =
-          ClangD->getASTContext().getSourceManager();
-
-      clang::PresumedLoc Loc = ClangSM.getPresumedLoc(ClangD->getLocation());
-      if (Loc.isValid()) {
-        // TODO: We should use a common function to fill in the location
-        // information for both cursor info and symbol graph gen, then also
-        // include position here.
+      StringRef FileName = getFileNameForDecl(ClangD);
+      if (!FileName.empty()) {
         OS.attributeObject("location", [&](){
-          SmallString<1024> FileURI("file://");
-          FileURI.append(Loc.getFilename());
-          OS.attribute("uri", FileURI.str());
+          // TODO: We should use a common function to fill in the location
+          // information for both cursor info and symbol graph gen, then also
+          // include position here.
+          serializeFileURI(OS, FileName);
         });
       }
     }
@@ -471,18 +509,17 @@ void Symbol::serializeLocationMixin(llvm::json::OStream &OS) const {
     return;
   }
 
+  auto FileName = getFileNameForDecl(VD);
+  if (FileName.empty()) {
+    return;
+  }
+  // TODO: Fold serializePosition into serializeFileURI so we don't need to load Loc twice?
   auto Loc = VD->getLoc(/*SerializedOK=*/true);
   if (Loc.isInvalid()) {
     return;
   }
-  auto FileName = VD->getASTContext().SourceMgr.getDisplayNameForLoc(Loc);
-  if (FileName.empty()) {
-    return;
-  }
   OS.attributeObject("location", [&](){
-    SmallString<1024> FileURI("file://");
-    FileURI.append(FileName);
-    OS.attribute("uri", FileURI.str());
+    serializeFileURI(OS, FileName);
     serializePosition("position", Loc, Graph->M.getASTContext().SourceMgr, OS);
   });
 }

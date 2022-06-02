@@ -472,7 +472,7 @@ static bool matchCallArgumentsImpl(
       // way to successfully match arguments to parameters.
       if (!parameterRequiresArgument(params, paramInfo, paramIdx) &&
           !param.getPlainType()->getASTContext().LangOpts
-              .isSwiftVersionAtLeast(6) &&
+              .hasFeature(Feature::ForwardTrailingClosures) &&
           anyParameterRequiresArgument(
               params, paramInfo, paramIdx + 1,
               nextArgIdx + 1 < numArgs
@@ -934,7 +934,7 @@ static bool requiresBothTrailingClosureDirections(
 
   // If backward matching is disabled, only scan forward.
   ASTContext &ctx = params.front().getPlainType()->getASTContext();
-  if (ctx.LangOpts.isSwiftVersionAtLeast(6))
+  if (ctx.LangOpts.hasFeature(Feature::ForwardTrailingClosures))
     return false;
 
   // If there are at least two parameters that meet the backward scan's
@@ -1479,13 +1479,14 @@ shouldOpenExistentialCallArgument(
     return None;
 
   // An argument expression that explicitly coerces to an existential
-  // disables the implicit opening of the existential.
+  // disables the implicit opening of the existential unless it's
+  // wrapped in parens.
   if (argExpr) {
     if (auto argCast = dyn_cast<ExplicitCastExpr>(
             argExpr->getSemanticsProvidingExpr())) {
       if (auto typeRepr = argCast->getCastTypeRepr()) {
         if (auto toType = cs.getType(typeRepr)) {
-          if (toType->isAnyExistentialType())
+          if (!isa<ParenExpr>(argExpr) && toType->isAnyExistentialType())
             return None;
         }
       }
@@ -1746,7 +1747,7 @@ static ConstraintSystem::TypeMatchResult matchCallArguments(
     // We pull these out special because variadic parameters ban lots of
     // the more interesting typing constructs called out below like
     // inout and @autoclosure.
-    if (cs.getASTContext().LangOpts.EnableExperimentalVariadicGenerics &&
+    if (cs.getASTContext().LangOpts.hasFeature(Feature::VariadicGenerics) &&
         paramInfo.isVariadicGenericParameter(paramIdx)) {
       auto *PET = paramTy->castTo<PackExpansionType>();
       OpenTypeSequenceElements openTypeSequence{cs, PET};
@@ -4896,9 +4897,13 @@ bool ConstraintSystem::repairFailures(
           if (!(overload && overload->choice.isDecl()))
             return true;
 
-          if (!getParameterList(overload->choice.getDecl())
-                   ->get(applyLoc->getParamIdx())
-                   ->getTypeOfDefaultExpr())
+          // Ignore decls that don't have meaningful parameter lists - this
+          // matches variables and parameters with function types.
+          auto *paramList = getParameterList(overload->choice.getDecl());
+          if (!paramList)
+            return true;
+
+          if (!paramList->get(applyLoc->getParamIdx())->getTypeOfDefaultExpr())
             return true;
         }
       }
@@ -6589,9 +6594,18 @@ ConstraintSystem::matchTypes(Type type1, Type type2, ConstraintKind kind,
               // Only try an inout-to-pointer conversion if we know it's not
               // an array being converted to a raw pointer type. Such
               // conversions can only use array-to-pointer.
-              if (!baseIsArray || !isRawPointerKind(pointerKind))
+              if (!baseIsArray || !isRawPointerKind(pointerKind)) {
                 conversionsOrFixes.push_back(
                     ConversionRestrictionKind::InoutToPointer);
+
+                // If regular inout-to-pointer conversion doesn't work,
+                // let's try C pointer conversion that has special semantics
+                // for imported declarations.
+                if (isArgumentOfImportedDecl(locator)) {
+                  conversionsOrFixes.push_back(
+                      ConversionRestrictionKind::InoutToCPointer);
+                }
+              }
             }
           }
 
@@ -9861,7 +9875,7 @@ bool ConstraintSystem::resolveClosure(TypeVariableType *typeVar,
   // type as seen in the body of the closure and the external parameter
   // type.
   bool oneWayConstraints =
-    getASTContext().TypeCheckerOpts.EnableOneWayClosureParameters ||
+    getASTContext().LangOpts.hasFeature(Feature::OneWayClosureParameters) ||
     resultBuilderType;
 
   auto *paramList = closure->getParameters();
@@ -11404,6 +11418,7 @@ ConstraintSystem::simplifyApplicableFnConstraint(
             FunctionType::get(trailingClosureTypes, callAsFunctionResultTy,
                               FunctionType::ExtInfo());
 
+        increaseScore(SK_DisfavoredOverload);
         // Form an unsolved constraint to apply trailing closures to a
         // callable type produced by `.init`. This constraint would become
         // active when `callableType` is bound.
@@ -11448,6 +11463,18 @@ ConstraintSystem::simplifyApplicableFnConstraint(
         result2 = typeEraseOpenedExistentialReference(
             result2, opened.second->getExistentialType(), opened.first,
             TypePosition::Covariant);
+      }
+
+      // If result type has any erased existential types it requires explicit
+      // `as` coercion.
+      if (AddExplicitExistentialCoercion::isRequired(
+              *this, func2->getResult(), openedExistentials, locator)) {
+        if (!shouldAttemptFixes())
+          return SolutionKind::Error;
+
+        if (recordFix(AddExplicitExistentialCoercion::create(
+                *this, result2, getConstraintLocator(locator))))
+          return SolutionKind::Error;
       }
     }
 
@@ -12221,6 +12248,35 @@ ConstraintSystem::simplifyRestrictedConstraintImpl(
 
   case ConversionRestrictionKind::PointerToCPointer:
     return simplifyPointerToCPointerRestriction(type1, type2, flags, locator);
+
+  case ConversionRestrictionKind::InoutToCPointer: {
+    SmallVector<Type, 2> optionals;
+
+    auto ptr2 =
+        type2->getDesugaredType()->lookThroughAllOptionalTypes(optionals);
+
+    increaseScore(SK_ValueToOptional, optionals.size());
+
+    PointerTypeKind pointerKind;
+    (void)ptr2->getAnyPointerElementType(pointerKind);
+
+    auto baseType1 = type1->getInOutObjectType();
+
+    Type ptr1;
+    // The right-hand size is a raw pointer, so let's use `UnsafeMutablePointer`
+    // for the `inout` type.
+    if (pointerKind == PTK_UnsafeRawPointer ||
+        pointerKind == PTK_UnsafeMutableRawPointer) {
+      ptr1 = BoundGenericType::get(Context.getUnsafeMutablePointerDecl(),
+                                   /*parent=*/nullptr, {baseType1});
+    } else {
+      ptr1 = baseType1->wrapInPointer(pointerKind);
+    }
+
+    assert(ptr1);
+
+    return simplifyPointerToCPointerRestriction(ptr1, ptr2, flags, locator);
+  }
 
   // T < U or T is bridged to V where V < U ===> Array<T> <c Array<U>
   case ConversionRestrictionKind::ArrayUpcast: {
@@ -13078,6 +13134,7 @@ ConstraintSystem::SolutionKind ConstraintSystem::simplifyFixConstraint(
   case FixKind::DropAsyncAttribute:
   case FixKind::AllowSwiftToCPointerConversion:
   case FixKind::AllowTupleLabelMismatch:
+  case FixKind::AddExplicitExistentialCoercion:
     llvm_unreachable("handled elsewhere");
   }
 

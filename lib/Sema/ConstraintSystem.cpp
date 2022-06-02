@@ -2296,11 +2296,30 @@ ConstraintSystem::getTypeOfMemberReference(
       baseObjTy->isExistentialType() && outerDC->getSelfProtocolDecl() &&
       // If there are no type variables, there were no references to 'Self'.
       type->hasTypeVariable()) {
+    auto getResultType = [](Type type) {
+      if (auto *funcTy = type->getAs<FunctionType>())
+        return funcTy->getResult();
+      return type;
+    };
+
+    auto nonErasedResultTy = getResultType(type);
+
     const auto selfGP = cast<GenericTypeParamType>(
         outerDC->getSelfInterfaceType()->getCanonicalType());
     auto openedTypeVar = replacements.lookup(selfGP);
     type = typeEraseOpenedExistentialReference(type, baseObjTy, openedTypeVar,
                                                TypePosition::Covariant);
+
+    if (!hasFixFor(locator) &&
+        AddExplicitExistentialCoercion::isRequired(
+            *this, nonErasedResultTy,
+            [&](TypeVariableType *typeVar) {
+              return openedTypeVar == typeVar ? baseObjTy : Optional<Type>();
+            },
+            locator)) {
+      recordFix(AddExplicitExistentialCoercion::create(
+          *this, getResultType(type), locator));
+    }
   }
 
   // Construct an idealized parameter type of the initializer associated
@@ -5719,7 +5738,8 @@ ConstraintSystem::isConversionEphemeral(ConversionRestrictionKind conversion,
   case ConversionRestrictionKind::StringToPointer:
     // Always ephemeral.
     return ConversionEphemeralness::Ephemeral;
-  case ConversionRestrictionKind::InoutToPointer: {
+  case ConversionRestrictionKind::InoutToPointer:
+  case ConversionRestrictionKind::InoutToCPointer: {
 
     // Ephemeral, except if the expression is a reference to a global or
     // static stored variable, or a directly accessed stored property on such a
