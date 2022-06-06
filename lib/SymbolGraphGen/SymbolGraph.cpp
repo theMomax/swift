@@ -631,7 +631,9 @@ bool SymbolGraph::isImplicitlyPrivate(const Decl *D,
 
   if (const auto *Extension = dyn_cast<ExtensionDecl>(D)) {
     if (const auto *Nominal = Extension->getExtendedNominal()) {
-      return isImplicitlyPrivate(Nominal, IgnoreContext);
+      return isImplicitlyPrivate(Nominal, IgnoreContext) ||
+             Symbol::getEffectiveAccessLevel(Extension) <
+                 Walker.Options.MinimumAccessLevel;
     }
   }
 

@@ -137,6 +137,13 @@ public:
   const ValueDecl *getDeclInheritingDocs() const;
 
   static bool supportsKind(DeclKind Kind);
+
+  /// Determines the effective access level of the given extension.
+  ///
+  /// The effective access level is defined as the minimum of:
+  ///  - the maximum access level of a property or conformance
+  ///  - the access level of the extended nominal
+  static AccessLevel getEffectiveAccessLevel(const ExtensionDecl *ED);
 };
 
 } // end namespace symbolgraphgen

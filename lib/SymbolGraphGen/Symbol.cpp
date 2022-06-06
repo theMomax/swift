@@ -477,7 +477,7 @@ void Symbol::serializeDeclarationFragmentMixin(llvm::json::OStream &OS) const {
 void Symbol::serializeAccessLevelMixin(llvm::json::OStream &OS) const {
   if (const auto *ED = dyn_cast<ExtensionDecl>(D)) {
     OS.attribute("accessLevel",
-                 getAccessLevelSpelling(ED->getMaxAccessLevel()));
+                 getAccessLevelSpelling(getEffectiveAccessLevel(ED)));
   } else if (const auto *VD = dyn_cast<ValueDecl>(D)) {
     OS.attribute("accessLevel", getAccessLevelSpelling(VD->getFormalAccess()));
   }
@@ -771,4 +771,24 @@ bool Symbol::supportsKind(DeclKind Kind) {
   default:
     return false;
   }
+}
+
+AccessLevel Symbol::getEffectiveAccessLevel(const ExtensionDecl *ED) {
+  AccessLevel maxPropertyAL = AccessLevel::Private;
+  for (auto Member : ED->getMembers()) {
+    if (const auto *VMember = dyn_cast<ValueDecl>(Member)) {
+      maxPropertyAL = std::max(maxPropertyAL, VMember->getFormalAccess());
+    }
+  }
+
+  AccessLevel maxInheritedAL = AccessLevel::Private;
+  for (auto Inherited : ED->getInherited()) {
+    if (const auto *Proto = dyn_cast_or_null<ProtocolDecl>(
+            Inherited.getType()->getAnyNominal())) {
+      maxInheritedAL = std::max(maxInheritedAL, Proto->getFormalAccess());
+    }
+  }
+
+  return std::min(ED->getExtendedNominal()->getFormalAccess(),
+                  std::max(maxPropertyAL, maxInheritedAL));
 }
