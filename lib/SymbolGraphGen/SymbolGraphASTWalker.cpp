@@ -168,12 +168,13 @@ bool SymbolGraphASTWalker::walkToDeclPre(Decl *D, CharSourceRange Range) {
     // grab them for some new conformsTo relationships.
     if (!Extension->getInherited().empty()) {
       SmallVector<const ProtocolDecl *, 4> Protocols;
+      SmallVector<const ProtocolDecl *, 4> UnexpandedProtocols;
       SmallVector<const ProtocolCompositionType *, 4> UnexpandedCompositions;
 
       auto HandleProtocolOrComposition = [&](Type Ty) {
         if (const auto *Proto =
             dyn_cast_or_null<ProtocolDecl>(Ty->getAnyNominal())) {
-          Protocols.push_back(Proto);
+          UnexpandedProtocols.push_back(Proto);
         } else if (const auto *Comp = Ty->getAs<ProtocolCompositionType>()) {
           UnexpandedCompositions.push_back(Comp);
         } else {
@@ -189,10 +190,22 @@ bool SymbolGraphASTWalker::walkToDeclPre(Decl *D, CharSourceRange Range) {
         HandleProtocolOrComposition(InheritedTy);
       }
 
-      while (!UnexpandedCompositions.empty()) {
-        const auto *Comp = UnexpandedCompositions.pop_back_val();
-        for (const auto &Member : Comp->getMembers()) {
-          HandleProtocolOrComposition(Member);
+      while (!UnexpandedCompositions.empty() || !UnexpandedProtocols.empty()) {
+        if (!UnexpandedCompositions.empty()) {
+          const auto *Comp = UnexpandedCompositions.pop_back_val();
+          for (const auto &Member : Comp->getMembers()) {
+            HandleProtocolOrComposition(Member);
+          }
+        } else /* !UnexpandedProtocols.empty() */ {
+          const auto *Proto = UnexpandedProtocols.pop_back_val();
+          for (const auto &InheritedEntry : Proto->getInherited()) {
+            auto InheritedTy = InheritedEntry.getType();
+            if (!InheritedTy) {
+              continue;
+            }
+            HandleProtocolOrComposition(InheritedTy);
+          }
+          Protocols.push_back(Proto);
         }
       }
 
