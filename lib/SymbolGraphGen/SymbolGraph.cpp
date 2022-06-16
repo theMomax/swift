@@ -365,11 +365,10 @@ void SymbolGraph::recordConformanceSynthesizedMemberRelationships(Symbol S) {
           auto ExtendedSG = Walker.getModuleSymbolGraph(OwningNominal);
 
           Symbol Source(this, SynthMember, OwningNominal);
-          Symbol Target(this, OwningNominal, nullptr);
 
           ExtendedSG->Nodes.insert(Source);
 
-          ExtendedSG->recordEdge(Source, Target, RelationshipKind::MemberOf());
+          ExtendedSG->recordEdge(Source, S, RelationshipKind::MemberOf());
          }
       }
     }
@@ -462,8 +461,8 @@ void SymbolGraph::recordOptionalRequirementRelationships(Symbol S) {
 
 void
 SymbolGraph::recordConformanceRelationships(Symbol S) {
-  const auto VD = S.getLocalSymbolDecl();
-  if (const auto *NTD = dyn_cast<NominalTypeDecl>(VD)) {
+  const auto D = S.getLocalSymbolDecl();
+  if (const auto *NTD = dyn_cast<NominalTypeDecl>(D)) {
     for (const auto *Conformance : NTD->getAllConformances()) {
       recordEdge(
           S, Symbol(this, Conformance->getProtocol(), nullptr),
