@@ -484,37 +484,33 @@ void Symbol::serializeAccessLevelMixin(llvm::json::OStream &OS) const {
 }
 
 void Symbol::serializeLocationMixin(llvm::json::OStream &OS) const {
-  const auto *VD = dyn_cast<ValueDecl>(D);
+  if (const auto *VD = dyn_cast<ValueDecl>(D)) {
+    if (ClangNode ClangN = VD->getClangNode()) {
+      if (!Graph->Walker.Options.IncludeClangDocs)
+        return;
 
-  if (!VD) {
-    return;
-  }
-
-  if (ClangNode ClangN = VD->getClangNode()) {
-    if (!Graph->Walker.Options.IncludeClangDocs)
-      return;
-
-    if (auto *ClangD = ClangN.getAsDecl()) {
-      StringRef FileName = getFileNameForDecl(ClangD);
-      if (!FileName.empty()) {
-        OS.attributeObject("location", [&](){
-          // TODO: We should use a common function to fill in the location
-          // information for both cursor info and symbol graph gen, then also
-          // include position here.
-          serializeFileURI(OS, FileName);
-        });
+      if (auto *ClangD = ClangN.getAsDecl()) {
+        StringRef FileName = getFileNameForDecl(ClangD);
+        if (!FileName.empty()) {
+          OS.attributeObject("location", [&](){
+            // TODO: We should use a common function to fill in the location
+            // information for both cursor info and symbol graph gen, then also
+            // include position here.
+            serializeFileURI(OS, FileName);
+          });
+        }
       }
+
+      return;
     }
-
-    return;
   }
-
-  auto FileName = getFileNameForDecl(VD);
+    
+  auto FileName = getFileNameForDecl(D);
   if (FileName.empty()) {
     return;
   }
   // TODO: Fold serializePosition into serializeFileURI so we don't need to load Loc twice?
-  auto Loc = VD->getLoc(/*SerializedOK=*/true);
+  auto Loc = D->getLoc(/*SerializedOK=*/true);
   if (Loc.isInvalid()) {
     return;
   }
