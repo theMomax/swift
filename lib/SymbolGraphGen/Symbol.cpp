@@ -760,8 +760,7 @@ bool Symbol::supportsKind(DeclKind Kind) {
   case DeclKind::Var: LLVM_FALLTHROUGH;
   case DeclKind::Subscript: LLVM_FALLTHROUGH;
   case DeclKind::TypeAlias: LLVM_FALLTHROUGH;
-  case DeclKind::AssociatedType:
-    LLVM_FALLTHROUGH;
+  case DeclKind::AssociatedType: LLVM_FALLTHROUGH;
   case DeclKind::Extension:
     return true;
   default:

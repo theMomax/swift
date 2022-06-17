@@ -1329,7 +1329,7 @@ def pretty_print: Flag<["-"], "pretty-print">,
 def emit_extension_block_symbols: Flag<["-"], "emit-extension-block-symbols">,
   Flags<[SwiftSymbolGraphExtractOption, FrontendOption,
         NoInteractiveOption, SupplementaryOutput, HelpHidden]>,
-  HelpText<"Emit 'swift.extension' symbols for extensions to external types instead of directly associating members and conformances with the extended nominal">;
+  HelpText<"Emit 'swift.extension' symbols for extensions to external types instead of directly associating members and conformances with the extended nominal when generating symbol graphs">;
 
 // swift-symbolgraph-extract-only options
 def output_dir : Separate<["-"], "output-dir">,
