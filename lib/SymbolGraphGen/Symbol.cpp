@@ -146,7 +146,14 @@ void Symbol::serializeNames(llvm::json::OStream &OS) const {
     SmallVector<PathComponent, 8> PathComponents;
     getPathComponents(PathComponents);
 
-    if (isa<GenericTypeDecl>(D) || isa<EnumElementDecl>(D)) {
+    const ValueDecl *Decl = nullptr;
+    if (const auto *ED = dyn_cast<ExtensionDecl>(D)) {
+      Decl = ED->getExtendedNominal();
+    } else if (const auto *VD = dyn_cast<ValueDecl>(D)) {
+      Decl = VD;
+    }
+      
+    if (isa<GenericTypeDecl>(Decl) || isa<EnumElementDecl>(Decl)) {
       SmallString<64> FullyQualifiedTitle;
 
       for (const auto *It = PathComponents.begin(); It != PathComponents.end(); ++It) {
